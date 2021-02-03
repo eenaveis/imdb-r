@@ -1,0 +1,145 @@
+---
+title: "Big Data in R - IMDB database"
+author: "Emil Sievänen"
+date: "2/2/2021"
+output: html_document
+---
+
+# Introduction
+In this demonstration, we will go through some big data manipulation and profiling. We explore the IMDB database that is available at the [IMDB website](https://datasets.imdbws.com/). Just download the three datasets: "title.akas", "title.basics" and "title.ratings" and you are good to go. We will combine these datasets into one large table with a total size of 1.9 Gb, so it might take some time to load these datasets. The full source code for this notebook is available at [GitHub](https://github.com/eenaveis/imdb-r).
+
+# Data Preparation
+
+```{r settings, echo = FALSE, message = FALSE, results = "hide"}
+library(tidyverse)
+
+Sys.setlocale("LC_ALL", "C") 
+```
+
+We start with loading the three datasets into our program and restrict the data to contain only U.S. movies.
+
+```{r data_importing, warning = FALSE, message = FALSE}
+title_akas <- read_tsv("title.akas.tsv", na = c("", "\\N"))
+
+title_basics <- read_tsv("title.basics.tsv", na = c("", "\\N"))
+
+title_ratings <- read_tsv("title.ratings.tsv", na = c("", "\\N"))
+```
+
+```{r filter_data}
+title_akas <- title_akas %>%
+  filter(region == "US") %>%
+  rename(tconst = titleId) %>%
+  select(tconst, title)
+
+title_basics <- title_basics %>%
+  select(tconst, startYear, runtimeMinutes, genres)
+
+title_ratings <- title_ratings %>%
+  select(tconst, averageRating)
+```
+
+
+The first dataset "title_akas" contains information about the movie titles. The second dataset "title_basics" contains more detailed data about the individual movies: release year, runtime in minutes and genres. The final dataset "title.ratings" contains the average ratings for each movie.
+
+We join these three tables together with the `left_join` function, which joins two tables together so that all matching rows are combined together and all observations from the first table are returned.
+
+```{r join}
+imdb <- title_akas %>%
+  left_join(title_basics, by = "tconst") %>%
+  left_join(title_ratings, by = "tconst")
+
+imdb
+```
+
+When looking at the genres column, we notice that the fields have multiple values. We want to separate these values into one column which is done with the `separate_rows` function. We create a new table `imdb_genres` which contains the genres column separated.
+
+```{r genres_table}
+imdb_genres <- imdb %>%
+  separate_rows(genres, sep = ",") %>%
+  rename(genre = genres) %>%
+  filter(!is.na(genre))
+```
+
+We will also remove redundant data from the memory, because we do not need the original tables anymore.
+```{r remove_redundant_data}
+rm(title_akas)
+rm(title_basics)
+rm(title_ratings)
+```
+
+# Exploratory Analysis
+
+Lets find out which movie is the oldest in this database:
+
+```{r oldest_movie}
+imdb %>%
+  filter(startYear == min(startYear, na.rm = TRUE))
+```
+
+The oldest movie is *Passage de Venus* which was released in 1874!
+
+Lets calculate the average runtimes and ratings for all movies.
+
+```{r averages}
+imdb %>%
+  summarise(average_runtime = mean(runtimeMinutes, na.rm = TRUE),
+            average_rating = mean(averageRating, na.rm = TRUE))
+
+```
+
+
+The average runtime is 49 minutes and average rating is 6.68.
+
+What about genres? It would be nice to know how many genres we have in total.
+
+```{r genres}
+imdb_genres %>%
+  summarise(genres = unique(genre))
+```
+
+We have a total of 28 genres in this database.
+
+Now that we know the different genres we have, lets find out what are the average ratings and runtimes for different genres.
+
+```{r average_by_genre, echo = FALSE}
+imdb_average_by_genre <- imdb_genres %>%
+  group_by(genre) %>%
+  summarise(average_rating = mean(averageRating, na.rm = TRUE),
+            average_runtime = mean(runtimeMinutes, na.rm = TRUE)) %>%
+  arrange(desc(average_rating))
+```
+
+```{r plot_by_genre_rating, echo = FALSE}
+ggplot(data = imdb_average_by_genre) +
+  geom_col(aes(x = genre, y = average_rating, fill = genre)) +
+  geom_abline(slope = 0, 
+                  intercept = median(imdb_average_by_genre$average_rating),
+                  color = "red",
+                  lty = 2
+              ) +
+  theme_dark() +
+  theme(axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_blank())
+```
+
+As we can see from the plot above, the average ratings have distributed quite evenly among the different genres. The next plot visualizes the average runtimes by genre.
+
+```{r plot_by_genre_runtime, echo = FALSE}
+ggplot(data = imdb_average_by_genre) +
+  geom_col(aes(x = genre, y = average_runtime, fill = genre)) +
+  geom_abline(slope = 0, 
+              intercept = median(imdb_average_by_genre$average_runtime),
+              color = "red",
+              lty = 2
+  ) +
+  theme_dark() +
+  theme(axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_blank())
+```
+
+As we can see, the adult genre has clearly the highest average runtime of all the genres. The lowest ones, animation and short genres, have both runtimes below 25 minutes.
+
+That is all for today. Next time, we will create a simple email spam filter with R. In the meanwhile, be sure to check out my other [projects](https://github.com/eenaveis/) too!
